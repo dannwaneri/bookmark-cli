@@ -151,6 +151,7 @@ def sync(debug: bool, max_pages: int):
         try:
             for batch, next_cursor in sync_module.fetch_all_bookmarks(ct0, cookie, debug=debug):
                 page_num += 1
+                page_new = 0
                 for tweet in batch:
                     if tweet["id"] in existing_ids:
                         skip_count += 1
@@ -158,6 +159,7 @@ def sync(debug: bool, max_pages: int):
                         db.upsert_bookmark(tweet)
                         existing_ids.add(tweet["id"])
                         new_count += 1
+                        page_new += 1
 
                 progress.update(
                     task,
@@ -169,6 +171,9 @@ def sync(debug: bool, max_pages: int):
                 if not next_cursor:
                     break
                 if max_pages and page_num >= max_pages:
+                    break
+                # Stop early once we hit a full page of already-synced tweets
+                if batch and page_new == 0:
                     break
 
         except PermissionError as e:
@@ -506,6 +511,7 @@ def sync_likes(debug: bool, max_pages: int):
                 ct0, cookie, user_id, likes_hash, debug=debug
             ):
                 page_num += 1
+                page_new = 0
                 for tweet in batch:
                     if tweet["id"] in existing_ids:
                         skip_count += 1
@@ -513,12 +519,16 @@ def sync_likes(debug: bool, max_pages: int):
                         db.upsert_bookmark(tweet, source="like")
                         existing_ids.add(tweet["id"])
                         new_count += 1
+                        page_new += 1
 
                 progress.update(task, description=f"Page {page_num}...", new=new_count, skip=skip_count)
 
                 if not next_cursor:
                     break
                 if max_pages and page_num >= max_pages:
+                    break
+                # Stop early once we hit a full page of already-synced tweets
+                if batch and page_new == 0:
                     break
 
         except PermissionError as e:
