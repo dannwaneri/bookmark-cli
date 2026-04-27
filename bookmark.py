@@ -618,7 +618,8 @@ def ingest_vector(batch: int, limit: int, enrich_images: bool):
 @click.option("--vault", envvar="OBSIDIAN_VAULT", required=True, help="Path to Obsidian vault folder (or set OBSIDIAN_VAULT in .env).")
 @click.option("--limit", default=15, show_default=True, help="Number of results to include.")
 @click.option("--subfolder", default="Research", show_default=True, help="Subfolder inside the vault to write into.")
-def export_to_obsidian(topic: str, vault: str, limit: int, subfolder: str):
+@click.option("--min-score", default=0.55, show_default=True, help="Drop results below this relevance score.")
+def export_to_obsidian(topic: str, vault: str, limit: int, subfolder: str, min_score: float):
     """Export semantic search results as a Markdown note into an Obsidian vault."""
     import re as _re
     from pathlib import Path as _Path
@@ -630,8 +631,9 @@ def export_to_obsidian(topic: str, vault: str, limit: int, subfolder: str):
         console.print(f"[red]{e}[/]")
         sys.exit(1)
 
+    results = [r for r in results if r.get("score", 0) >= min_score]
     if not results:
-        console.print("[yellow]No results found — nothing to export.[/]")
+        console.print(f"[yellow]No results above min-score {min_score} — try lowering --min-score or changing the query.[/]")
         return
 
     # Enrich with local DB data
@@ -674,8 +676,9 @@ def export_to_obsidian(topic: str, vault: str, limit: int, subfolder: str):
         likes  = f"{item['likes']:,}" if item["likes"] else "—"
         text   = item["text"].replace("\n", " ").strip()
         url    = item["url"] or ""
+        score  = item["score"]
         lines += [
-            f"## {i}. @{author} · {likes} likes",
+            f"## {i}. @{author} · {likes} likes  ·  score {score}",
             f"> {text}",
             "",
             f"[View tweet]({url})" if url else "",
