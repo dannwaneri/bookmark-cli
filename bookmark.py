@@ -5,7 +5,7 @@ import sys
 import json
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Force UTF-8 on Windows so rich's braille spinners don't crash cp1252 terminals
 if sys.platform == "win32":
@@ -653,7 +653,7 @@ def export_to_obsidian(topic: str, vault: str, limit: int, subfolder: str, min_s
         })
 
     # Build Markdown
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     safe_topic = _re.sub(r'[\\/:*?"<>|]', "-", topic)
     filename = f"{today} {safe_topic}.md"
 
