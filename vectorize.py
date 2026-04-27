@@ -129,6 +129,7 @@ def semantic_search(query: str, limit: int = 20) -> list[dict]:
         )
         r.raise_for_status()
         data = r.json()
-        return data.get("results", data.get("matches", []))
+        results = data.get("results", data.get("matches", []))
+        return [r for r in results if r.get("score", 0) <= 2.0]
     except Exception as e:
         raise RuntimeError(f"Search failed: {e}")
