@@ -88,17 +88,27 @@ Re-parses stored raw JSON to fill in likes, retweets, replies, and views. Run on
 ### Ingest into Vectorize (semantic search)
 ```bash
 python bookmark.py ingest-vector
-python bookmark.py ingest-vector --batch 100   # larger batches (faster)
-python bookmark.py ingest-vector --limit 500   # ingest only 500 tweets this run
+python bookmark.py ingest-vector --batch 100          # larger batches (faster)
+python bookmark.py ingest-vector --limit 500          # ingest only 500 tweets this run
+python bookmark.py ingest-vector --enrich-images      # describe photos with Llama 4 Scout before indexing
 ```
 Pushes bookmarks into your Cloudflare Vectorize worker in batches. Resumes from where it left off — already-ingested tweets are skipped.
+
+`--enrich-images` calls `/analyze-image` on each photo URL before vectorizing, appending an AI-generated description to the content. This makes image-only tweets searchable by what's in the image. Adds ~10s per photo tweet — run as a one-time backfill, not in the daily cron.
 
 ### Semantic search
 ```bash
 python bookmark.py semantic-hooks "building in public"
 python bookmark.py semantic-hooks "RAG vector search" --limit 20
 ```
-Finds semantically related bookmarks — matches meaning, not just keywords. Returns real engagement data from the local database.
+Finds semantically related bookmarks — matches meaning, not just keywords. Returns real engagement data from the local database. Results with reranker scores above 2.0 are automatically filtered as noise.
+
+### Generate knowledge reflections
+```bash
+python bookmark.py reflect                        # 20 documents, 1 batch
+python bookmark.py reflect --batch 50 --runs 10  # 500 documents across 10 batches
+```
+Samples un-reflected documents from the vector index and asks Llama to synthesise what's new, how it connects to existing knowledge, and what gap remains. Reflections are stored back in the index and surface alongside raw results in semantic search. Runs automatically in the daily cron (60 per day).
 
 ## Storage
 
