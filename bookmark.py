@@ -554,7 +554,8 @@ def sync_likes(debug: bool, max_pages: int):
 @cli.command("ingest-vector")
 @click.option("--batch", default=50, show_default=True, help="Tweets per batch.")
 @click.option("--limit", default=0, help="Max tweets to ingest (0 = all).")
-def ingest_vector(batch: int, limit: int):
+@click.option("--enrich-images", is_flag=True, default=False, help="Call /analyze-image for tweets with photos.")
+def ingest_vector(batch: int, limit: int, enrich_images: bool):
     """Push bookmarks into vectorize-mcp-worker for semantic search."""
     total_count = db.get_stats()["total"]
     total_remaining = total_count - db.vectorized_count()
@@ -588,7 +589,7 @@ def ingest_vector(batch: int, limit: int):
                 break
 
             tweets = [dict(row) for row in rows]
-            succeeded, fail_count = vec_module.ingest_batch(tweets)
+            succeeded, fail_count = vec_module.ingest_batch(tweets, enrich_images=enrich_images)
 
             # Mark all IDs when the worker responded (succeeded > 0).
             # Filtered/short tweets count as "failed" but won't succeed on retry,
@@ -608,6 +609,44 @@ def ingest_vector(batch: int, limit: int):
         f"  Ingested:  [cyan]{done:,}[/]\n"
         f"  Failed:    [dim]{failed:,}[/]\n"
         f"  Total in worker: ~[cyan]{db.vectorized_count():,}[/]",
+        border_style="green",
+    ))
+
+
+@cli.command("reflect")
+@click.option("--batch", default=20, show_default=True, help="Documents to reflect per run (max 100).")
+@click.option("--runs", default=1, show_default=True, help="Number of batches to run.")
+def reflect(batch: int, runs: int):
+    """Generate LLM reflections for un-reflected documents in the vector index."""
+    total_reflected = 0
+    total_failed = 0
+
+    with Progress(
+        SpinnerColumn("line"),
+        TextColumn("[progress.description]{task.description}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task(f"Reflecting (0/{runs} batches)...", total=runs)
+
+        for i in range(runs):
+            progress.update(task, description=f"Reflecting ({i + 1}/{runs} batches)...")
+            try:
+                result = vec_module.reflect_batch(limit=batch)
+                total_reflected += result.get("reflected", 0)
+                total_failed += result.get("failed", 0)
+                if result.get("reflected", 0) == 0:
+                    progress.advance(task, advance=runs - i)
+                    break
+            except RuntimeError as e:
+                console.print(f"[red]{e}[/]")
+                break
+            progress.advance(task, advance=1)
+
+    console.print(Panel(
+        f"[bold green]Done![/]\n\n"
+        f"  Reflected: [cyan]{total_reflected:,}[/]\n"
+        f"  Failed:    [dim]{total_failed:,}[/]",
         border_style="green",
     ))
 
@@ -691,9 +730,16 @@ def semantic_hooks(topic: str, limit: int, debug: bool):
 
 @cli.command()
 @click.argument("tweet_id")
-def show(tweet_id: str):
-    """Show full detail of a single bookmark."""
-    row = db.get_bookmark(tweet_id)
+@click.option("--open-media", is_flag=True, default=False, help="Open media in browser.")
+def show(tweet_id: str, open_media: bool):
+    """Show full detail of a single bookmark. Accepts tweet ID, partial ID, or tweet URL."""
+    import re
+    # Accept full tweet URL — extract the ID
+    url_match = re.search(r'/status/(\d+)', tweet_id)
+    if url_match:
+        tweet_id = url_match.group(1)
+
+    row = db.get_bookmark(tweet_id) or db.get_bookmark_prefix(tweet_id)
     if not row:
         console.print(f"[red]No bookmark found with ID:[/] {tweet_id}")
         sys.exit(1)
@@ -720,9 +766,11 @@ def show(tweet_id: str):
             pass
 
     if media:
+        import webbrowser
         console.print()
         console.print("[bold]Media:[/]")
         icons = {"photo": "🖼 ", "video": "🎬", "animated_gif": "🎥"}
+        media_urls = []
         for i, m in enumerate(media, 1):
             icon = icons.get(m.get("type", "photo"), "📎")
             mtype = m.get("type", "photo").replace("_", " ").title()
@@ -731,6 +779,14 @@ def show(tweet_id: str):
             console.print(f"  {icon} [{mtype}] [blue]{url}[/]")
             if thumb and thumb != url:
                 console.print(f"     Thumbnail: [dim]{thumb}[/]")
+            if url:
+                media_urls.append(url)
+
+        if media_urls:
+            if open_media or click.confirm("\nOpen media in browser?", default=False):
+                for url in media_urls:
+                    webbrowser.open(url)
+                console.print(f"[green]Opened {len(media_urls)} item(s) in browser.[/]")
 
     if row["raw_json"]:
         try:

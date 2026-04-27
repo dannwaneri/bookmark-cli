@@ -21,13 +21,50 @@ def _clean(text: str) -> str:
     return text.replace("\n", " ").strip()
 
 
-def ingest_batch(tweets: list[dict]) -> tuple[int, int]:
+def analyze_image(image_url: str) -> str:
+    """Call /analyze-image on the worker and return a description string."""
+    try:
+        r = requests.post(
+            f"{VECTORIZE_URL}/analyze-image",
+            json={"url": image_url},
+            headers=HEADERS,
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json().get("description", "")
+    except Exception:
+        return ""
+
+
+def _get_image_url(media_json: str | None) -> str | None:
+    """Return the first usable image URL from media_json, or None."""
+    if not media_json:
+        return None
+    try:
+        items = __import__("json").loads(media_json)
+    except Exception:
+        return None
+    for item in items:
+        if item.get("type") == "photo" and item.get("url"):
+            return item["url"]
+        if item.get("thumb"):  # video thumbnail
+            return item["thumb"]
+    return None
+
+
+def ingest_batch(tweets: list[dict], enrich_images: bool = False) -> tuple[int, int]:
     """Send up to 100 tweets in one batch. Returns (succeeded, failed)."""
     documents = []
     for tweet in tweets:
         content = _clean(tweet.get("text", ""))
         if not content or len(content) < 10:
             continue
+        if enrich_images:
+            img_url = _get_image_url(tweet.get("media_json"))
+            if img_url:
+                desc = analyze_image(img_url)
+                if desc:
+                    content = f"{content}\n[Image: {desc}]"
         documents.append({
             "id": f"tweet_{tweet['id']}",
             "content": content,
@@ -58,6 +95,21 @@ def ingest_batch(tweets: list[dict]) -> tuple[int, int]:
         return data.get("succeeded", 0), data.get("failed", 0)
     except Exception as e:
         return 0, len(documents)
+
+
+def reflect_batch(limit: int = 20) -> dict:
+    """Trigger reflection for a random sample of un-reflected documents."""
+    try:
+        r = requests.post(
+            f"{VECTORIZE_URL}/reflect/batch",
+            json={"limit": limit},
+            headers=HEADERS,
+            timeout=300,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        raise RuntimeError(f"Reflect failed: {e}")
 
 
 def semantic_search(query: str, limit: int = 20) -> list[dict]:

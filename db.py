@@ -169,7 +169,7 @@ def get_unvectorized(batch_size: int = 100) -> list[sqlite3.Row]:
     cur.execute(
         """
         SELECT id, text, author_username, author_name, url, created_at,
-               likes, retweets, views
+               likes, retweets, views, media_json
         FROM bookmarks
         WHERE vectorized = 0 OR vectorized IS NULL
         ORDER BY likes DESC
@@ -275,6 +275,16 @@ def get_bookmark(tweet_id: str) -> sqlite3.Row | None:
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM bookmarks WHERE id = ?", (tweet_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def get_bookmark_prefix(prefix: str) -> sqlite3.Row | None:
+    """Find a bookmark by ID prefix — useful when the displayed ID is truncated."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM bookmarks WHERE id LIKE ? LIMIT 1", (f"{prefix}%",))
     row = cur.fetchone()
     conn.close()
     return row

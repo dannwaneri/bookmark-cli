@@ -12,4 +12,7 @@ echo [%date% %time%] Likes sync done >> logs\sync.log
 C:\Python314\python.exe bookmark.py ingest-vector --batch 100 >> logs\sync.log 2>&1
 echo [%date% %time%] Vector ingest done >> logs\sync.log
 
+C:\Python314\python.exe bookmark.py reflect --batch 20 --runs 3 >> logs\sync.log 2>&1
+echo [%date% %time%] Reflection done >> logs\sync.log
+
 echo [%date% %time%] Daily sync complete >> logs\sync.log
