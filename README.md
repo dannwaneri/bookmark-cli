@@ -110,6 +110,13 @@ python bookmark.py reflect --batch 50 --runs 10  # 500 documents across 10 batch
 ```
 Samples un-reflected documents from the vector index and asks Llama to synthesise what's new, how it connects to existing knowledge, and what gap remains. Reflections are stored back in the index and surface alongside raw results in semantic search. Runs automatically in the daily cron (60 per day).
 
+### Export to Obsidian
+```bash
+python bookmark.py export "RAG failure modes" --vault "/path/to/vault"
+python bookmark.py export "building in public" --vault "/path/to/vault" --limit 20 --subfolder "Hooks"
+```
+Runs a semantic search and writes results as a dated Markdown note into your Obsidian vault. Set `OBSIDIAN_VAULT` in `.env` to skip the `--vault` flag. Output includes YAML frontmatter (for Obsidian properties), blockquoted tweet text, engagement stats, and direct links.
+
 ## Storage
 
 - Database: `~/.bookmark-cli/bookmarks.db` (SQLite with FTS5)

@@ -613,6 +613,92 @@ def ingest_vector(batch: int, limit: int, enrich_images: bool):
     ))
 
 
+@cli.command("export")
+@click.argument("topic")
+@click.option("--vault", envvar="OBSIDIAN_VAULT", required=True, help="Path to Obsidian vault folder (or set OBSIDIAN_VAULT in .env).")
+@click.option("--limit", default=15, show_default=True, help="Number of results to include.")
+@click.option("--subfolder", default="Research", show_default=True, help="Subfolder inside the vault to write into.")
+def export_to_obsidian(topic: str, vault: str, limit: int, subfolder: str):
+    """Export semantic search results as a Markdown note into an Obsidian vault."""
+    import re as _re
+    from pathlib import Path as _Path
+
+    console.print(f"\n[cyan]Searching:[/] {topic!r}\n")
+    try:
+        results = vec_module.semantic_search(topic, limit=limit)
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/]")
+        sys.exit(1)
+
+    if not results:
+        console.print("[yellow]No results found — nothing to export.[/]")
+        return
+
+    # Enrich with local DB data
+    enriched = []
+    for r in results:
+        doc_id = r.get("id", "")
+        tweet_id = __import__("re").sub(r"-chunk-\d+", "", doc_id.removeprefix("tweet_"))
+        row = db.get_bookmark(tweet_id) if tweet_id else None
+        meta = r.get("metadata", {})
+        enriched.append({
+            "author":   (row["author_username"] if row else meta.get("author", "unknown")),
+            "name":     (row["author_name"]     if row else meta.get("name", "")),
+            "text":     (row["text"]            if row else meta.get("content", r.get("content", ""))),
+            "likes":    int(row["likes"]        if row else meta.get("likes", 0) or 0),
+            "url":      (row["url"]             if row else meta.get("url", "")),
+            "score":    round(r.get("score", 0), 3),
+        })
+
+    # Build Markdown
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    safe_topic = _re.sub(r'[\\/:*?"<>|]', "-", topic)
+    filename = f"{today} {safe_topic}.md"
+
+    lines = [
+        "---",
+        f"created: {today}",
+        f"query: \"{topic}\"",
+        "source: bookmark-cli",
+        f"results: {len(enriched)}",
+        "tags: [research, bookmark-cli]",
+        "---",
+        "",
+        f"# {topic}",
+        f"*{len(enriched)} tweets · exported {today} via bookmark-cli*",
+        "",
+    ]
+
+    for i, item in enumerate(enriched, 1):
+        author = item["author"]
+        likes  = f"{item['likes']:,}" if item["likes"] else "—"
+        text   = item["text"].replace("\n", " ").strip()
+        url    = item["url"] or ""
+        lines += [
+            f"## {i}. @{author} · {likes} likes",
+            f"> {text}",
+            "",
+            f"[View tweet]({url})" if url else "",
+            "",
+        ]
+
+    content = "\n".join(lines)
+
+    # Write to vault
+    out_dir = _Path(vault) / subfolder
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / filename
+    out_path.write_text(content, encoding="utf-8")
+
+    console.print(Panel(
+        f"[bold green]Exported![/]\n\n"
+        f"  File:    [cyan]{out_path}[/]\n"
+        f"  Results: [cyan]{len(enriched)}[/]\n"
+        f"  Vault:   [dim]{vault}[/]",
+        border_style="green",
+    ))
+
+
 @cli.command("reflect")
 @click.option("--batch", default=20, show_default=True, help="Documents to reflect per run (max 100).")
 @click.option("--runs", default=1, show_default=True, help="Number of batches to run.")
