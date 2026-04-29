@@ -1,0 +1,11 @@
+name = "bookmark-brain-bot"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+[[kv_namespaces]]
+binding = "TARGETS_KV"
+id = "ad6cb6f820074d61bb990a9e2fe8875d"
+
+[[services]]
+binding = "VECTORIZE_WORKER"
+service = "vectorize-mcp-worker"

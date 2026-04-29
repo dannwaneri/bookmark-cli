@@ -16,3 +16,6 @@ C:\Python314\python.exe bookmark.py reflect --batch 20 --runs 3 >> logs\sync.log
 echo [%date% %time%] Reflection done >> logs\sync.log
 
 echo [%date% %time%] Daily sync complete >> logs\sync.log
+
+C:\Python314\python.exe write_status.py complete >> logs\sync.log 2>&1
+echo [%date% %time%] Status written to KV >> logs\sync.log
