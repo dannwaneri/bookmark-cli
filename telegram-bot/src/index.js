@@ -15,6 +15,11 @@ import {
   handleWorked,
   handleWinners,
   handleStatus,
+  handleRefresh,
+  handleBackup,
+  handleRestore,
+  handleDraft,
+  handleTrending,
 } from "./commands.js";
 
 export default {
@@ -113,6 +118,21 @@ async function dispatch(cmd, arg, chatId, env) {
         break;
       case "/status":
         await handleStatus(chatId, env);
+        break;
+      case "/refresh":
+        await handleRefresh(chatId, env);
+        break;
+      case "/backup":
+        await handleBackup(chatId, env);
+        break;
+      case "/restore":
+        await handleRestore(chatId, env);
+        break;
+      case "/draft":
+        await handleDraft(chatId, arg, env);
+        break;
+      case "/trending":
+        await handleTrending(chatId, arg, env);
         break;
       default:
         break;

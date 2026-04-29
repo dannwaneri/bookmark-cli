@@ -152,6 +152,13 @@ What is this person's likely stance on "${topic}"?`;
   return callClaude(apiKey, system, user);
 }
 
+export async function analyzeWinners(apiKey, winners) {
+  const block = winners.slice(0, 20).map((w, i) => `${i + 1}. "${w}"`).join("\n");
+  const system = `You are a content analyst. Identify what makes high-performing Twitter replies work. Be specific and brief.`;
+  const user = `These replies all got real engagement. In 3 concise bullet points identify what they share — structure, tone, opening hook, length, rhetorical move:\n\n${block}`;
+  return callClaude(apiKey, system, user);
+}
+
 export async function summarizePattern(apiKey, examples) {
   const exampleBlock = examples
     .slice(0, 10)
