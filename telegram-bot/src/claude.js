@@ -96,7 +96,7 @@ Write 3 replies to this tweet:
   return callClaude(apiKey, system, user);
 }
 
-export async function continueThread(apiKey, yourReply, theirReply, examples) {
+export async function continueThread(apiKey, yourReply, theirReply, examples, webContext = null) {
   const exampleBlock = examples
     .slice(0, 5)
     .map((e, i) => `${i + 1}. @${e.author}: "${e.text}"`)
@@ -112,10 +112,16 @@ Rules:
 - No sycophancy
 - No hashtags
 - Make at least one option end with a question to invite them to keep talking
+- The subject may be a manager, pundit, politician, player, or institution — infer from context, do NOT default to player/transfer framing. Never use signing, transfer, fee, or contract language unless those words appear in the conversation
+- Do NOT output any reasoning or subject identification — jump straight to the 3 replies
 
 Return exactly 3 options numbered 1. 2. 3. Nothing else.`;
 
-  const user = `Style reference:
+  const webBlock = webContext
+    ? `Factual context about who/what is being discussed (use for names, roles, records — do NOT let this override the opinion angle):\n${webContext}\n\n`
+    : "";
+
+  const user = `${webBlock}Style reference:
 ${exampleBlock}
 
 Your original reply: "${yourReply}"

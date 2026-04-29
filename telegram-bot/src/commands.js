@@ -470,30 +470,38 @@ export async function handleRemoveStance(chatId, arg, env) {
 export async function handleThread(chatId, arg, env) {
   const { TELEGRAM_BOT_TOKEN, VECTORIZE_API_KEY, CLAUDE_API_KEY, TARGETS_KV } = env;
 
+  // Extract --web flag
+  const useWeb = /--web\b/i.test(arg);
+  const cleanArg = arg.replace(/\s*--web\b/i, "").trim();
+
   // Parse: "Your reply: ...\nTheir reply: ..."
-  const yourMatch = arg.match(/your\s*reply\s*:\s*(.+?)(?=their\s*reply\s*:|$)/is);
-  const theirMatch = arg.match(/their\s*reply\s*:\s*(.+?)$/is);
+  const yourMatch = cleanArg.match(/your\s*reply\s*:\s*(.+?)(?=their\s*reply\s*:|$)/is);
+  const theirMatch = cleanArg.match(/their\s*reply\s*:\s*(.+?)$/is);
 
   if (!yourMatch || !theirMatch) {
     return sendMessage(TELEGRAM_BOT_TOKEN, chatId,
-      `Usage:\n/thread\nYour reply: what you said\nTheir reply: what they responded`
+      `Usage:\n/thread\nYour reply: what you said\nTheir reply: what they responded\n\nAdd ${code("--web")} for live context on the subject`
     );
   }
 
   const yourReply = yourMatch[1].trim();
   const theirReply = theirMatch[1].trim();
 
-  await sendMessage(TELEGRAM_BOT_TOKEN, chatId, "⏳ Drafting thread continuations...");
+  await sendMessage(TELEGRAM_BOT_TOKEN, chatId, useWeb ? "⏳ Searching web + drafting continuations..." : "⏳ Drafting thread continuations...");
 
   const targets = await getTargets(TARGETS_KV);
-  const results = await searchCorpus(theirReply, { vectorizeWorker: env.VECTORIZE_WORKER, vectorizeApiKey: VECTORIZE_API_KEY });
+  // Search on both sides of the conversation combined for richer, more accurate context
+  const combinedQuery = `${yourReply} ${theirReply}`.slice(0, 300);
+  const results = await searchCorpus(combinedQuery, { vectorizeWorker: env.VECTORIZE_WORKER, vectorizeApiKey: VECTORIZE_API_KEY });
   const targetMatches = filterByAuthors(results, targets).map(formatResult);
   const examples = targetMatches.length >= 2 ? targetMatches : results.map(formatResult);
 
-  const options = await continueThread(CLAUDE_API_KEY, yourReply, theirReply, examples);
+  const webContext = useWeb ? await searchWeb(theirReply, env.TAVILY_API_KEY) : null;
+  const options = await continueThread(CLAUDE_API_KEY, yourReply, theirReply, examples, webContext);
 
+  const webNote = useWeb && webContext ? `\n${i("🌐 Live web context included")}` : "";
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
-    `${b("Continue the thread:")}\n\n${options}\n\n${i("Based on your corpus style")}`
+    `${b("Continue the thread:")}\n\n${options}\n\n${i("Based on your corpus style")}${webNote}`
   );
 }
 
