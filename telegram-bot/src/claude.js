@@ -5,6 +5,15 @@ function currentDate() {
   return new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 }
 
+// Voice fingerprint derived from the user's own high-performing replies
+const VOICE_RULES = `Voice rules (non-negotiable):
+- Open with a reframe, inversion, or structural implication — never restate the original point
+- One sharp analogy or compressed metaphor does the argumentative work — translate abstract → concrete
+- End with a single short declarative sentence. If the last sentence has more than one clause, cut it
+- Banned phrases: "At the end of the day", "Let that sink in", "The reality is", "It's worth noting", "That said", "In today's world", "This is why", "Interestingly", "Absolutely", "Exactly"
+- No em-dash drama. No rhetorical questions as openers. No passive voice hedging
+- 2–4 sentences total. Earn attention by refusing to overstay it`;
+
 async function callClaude(apiKey, systemPrompt, userMessage) {
   const res = await fetch(API_URL, {
     method: "POST",
@@ -34,11 +43,10 @@ export async function rewriteTweet(apiKey, draft, examples) {
 
   const system = `You are a tweet editor. Rewrite drafts to be punchier and more engaging, inspired by the style of the examples. Today's date is ${currentDate()}.
 
-Style rules:
-- Short and declarative — cut filler, no hedging
-- Personal observation or direct opinion
+${VOICE_RULES}
+
+Additional rules:
 - One clean idea per tweet
-- Plain language
 - No hashtags unless they appear naturally in the examples
 - Under 280 characters
 - ALWAYS produce a different version — even if the draft is already good, make it sharper or more specific
@@ -72,11 +80,11 @@ export async function suggestReplies(apiKey, targetTweet, examples, stance = nul
 
   const system = `You are a Twitter reply coach. Generate 3 strong replies to a tweet. Today's date is ${currentDate()}.
 
-Rules:${stanceLine}
+${VOICE_RULES}
+
+Additional rules:${stanceLine}
 - Write as opinion and perspective — never assert specific facts, benchmarks, or statistics you can't verify
-- Replies match the direct, declarative style of the examples
 - Under 200 characters each
-- No sycophancy ("great point!", "love this!")
 - No hashtags
 
 Return exactly 3 replies numbered 1. 2. 3. Nothing else.`;
@@ -104,12 +112,13 @@ export async function continueThread(apiKey, yourReply, theirReply, examples, we
 
   const system = `You are a Twitter conversation coach. Someone replied to your tweet and you need to continue the thread naturally. Today's date is ${currentDate()}.
 
-Rules:
+${VOICE_RULES}
+
+Additional rules:
 - Keep the energy going — match their tone (humor, curiosity, pushback)
 - Add something new: a detail, a pivot, a question, or a sharper version of the original idea
 - Write as opinion and perspective — never assert facts you can't verify
 - Under 200 characters each
-- No sycophancy
 - No hashtags
 - Make at least one option end with a question to invite them to keep talking
 - The subject may be a manager, pundit, politician, player, or institution — infer from context, do NOT default to player/transfer framing. Never use signing, transfer, fee, or contract language unless those words appear in the conversation
