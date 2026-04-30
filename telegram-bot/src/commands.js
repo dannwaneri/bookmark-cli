@@ -53,9 +53,11 @@ function detectStance(tweet, stances) {
   let best = null;
   let bestScore = 0;
   for (const [topic, stance] of Object.entries(stances)) {
-    const keywords = topic.toLowerCase().split(/[\s,]+/).filter(Boolean);
-    const score = keywords.filter(k => text.includes(k)).length;
-    // Require at least 2 keyword matches to avoid single generic-word false positives
+    const keywords = topic.toLowerCase().split(/[\s,]+/).filter(k => k.length >= 3);
+    if (!keywords.length) continue;
+    const score = keywords.filter(k =>
+      new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text)
+    ).length;
     if (score >= 2 && score > bestScore) { bestScore = score; best = stance; }
   }
   return best;
