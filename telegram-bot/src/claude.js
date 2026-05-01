@@ -35,15 +35,19 @@ async function callClaude(apiKey, systemPrompt, userMessage, maxTokens = 512) {
   return data.content[0].text.trim();
 }
 
-export async function rewriteTweet(apiKey, draft, examples) {
+export async function rewriteTweet(apiKey, draft, examples, voiceInsights = []) {
   const exampleBlock = examples
     .slice(0, 5)
     .map((e, i) => `${i + 1}. @${e.author}: "${e.text}"`)
     .join("\n");
 
+  const insightsBlock = voiceInsights.length
+    ? `\nLearned from your edits:\n${voiceInsights.slice(0, 5).map(ins => `- ${ins}`).join("\n")}`
+    : "";
+
   const system = `You are a tweet editor. Rewrite drafts to be punchier and more engaging, inspired by the style of the examples. Today's date is ${currentDate()}.
 
-${VOICE_RULES}
+${VOICE_RULES}${insightsBlock}
 
 Additional rules:
 - One clean idea per tweet
@@ -64,7 +68,7 @@ Rewrite this draft to match that style while keeping the core idea intact:
   return callClaude(apiKey, system, user);
 }
 
-export async function suggestReplies(apiKey, targetTweet, examples, stance = null, winners = [], webContext = null) {
+export async function suggestReplies(apiKey, targetTweet, examples, stance = null, winners = [], webContext = null, voiceInsights = []) {
   const winnerBlock = winners.length
     ? `Your proven high-performing replies (prioritise this style):\n${winners.slice(0, 5).map((w, i) => `${i + 1}. "${w}"`).join("\n")}\n\n`
     : "";
@@ -78,9 +82,13 @@ export async function suggestReplies(apiKey, targetTweet, examples, stance = nul
     ? `\n- The user's position is: "${stance}" — all 3 replies must argue FROM this angle, not against it`
     : `\n- Challenge an assumption, reframe the claim, or add a contrarian angle`;
 
+  const insightsBlock = voiceInsights.length
+    ? `\nLearned from your edits:\n${voiceInsights.slice(0, 5).map(ins => `- ${ins}`).join("\n")}`
+    : "";
+
   const system = `You are a Twitter reply coach. Generate 3 strong replies to a tweet. Today's date is ${currentDate()}.
 
-${VOICE_RULES}
+${VOICE_RULES}${insightsBlock}
 
 Additional rules:${stanceLine}
 - Write as opinion and perspective — never assert specific facts, benchmarks, or statistics you can't verify
@@ -174,7 +182,7 @@ export async function analyzeWinners(apiKey, winners) {
   return callClaude(apiKey, system, user);
 }
 
-export async function generateLongContent(apiKey, topic, examples, stance = null, winners = [], format = "thread", webContext = null) {
+export async function generateLongContent(apiKey, topic, examples, stance = null, winners = [], format = "thread", webContext = null, voiceInsights = []) {
   const exampleBlock = examples
     .slice(0, 8)
     .map((e, i) => `${i + 1}. @${e.author} (${e.likes || 0} likes): "${e.text}"`)
@@ -192,10 +200,14 @@ export async function generateLongContent(apiKey, topic, examples, stance = null
     ? `Factual context (use for names, dates, facts only — do not let this override the argument angle):\n${webContext}\n\n`
     : "";
 
+  const insightsBlock = voiceInsights.length
+    ? `\nLearned from your edits:\n${voiceInsights.slice(0, 5).map(ins => `- ${ins}`).join("\n")}`
+    : "";
+
   if (format === "thread") {
     const system = `You are a Twitter thread writer. Write punchy, argumentative threads. Today's date is ${currentDate()}.
 
-${VOICE_RULES}
+${VOICE_RULES}${insightsBlock}
 
 Thread rules:${stanceLine}
 - Tweet 1 is the hook: a reframe, inversion, or structural implication. Must stop the scroll. Must stand alone as a single tweet.
@@ -218,7 +230,7 @@ Write a thread on: "${topic}"`;
   // essay mode
   const system = `You are writing a dev.to article. Write a structured, opinionated essay. Today's date is ${currentDate()}.
 
-${VOICE_RULES}
+${VOICE_RULES}${insightsBlock}
 
 Essay rules:${stanceLine}
 - Open with a specific incident, quote, or data point — never a thesis statement
@@ -237,6 +249,15 @@ ${exampleBlock}
 Write an essay on: "${topic}"`;
 
   return callClaude(apiKey, system, user, 2048);
+}
+
+export async function extractVoiceDelta(apiKey, original, edited) {
+  const system = `You are analyzing how someone edited AI-generated writing to better match their voice.
+In one short sentence (max 15 words), describe what the edit improved — be specific about the writing technique, not the content.
+Good examples: "Replaced abstract claim with concrete consequence." / "Cut the setup, kept only the landing." / "Swapped passive hedge for direct accusation."
+Return only the sentence. No quotes, no preamble.`;
+  const user = `Original: "${original}"\nEdited to: "${edited}"`;
+  return callClaude(apiKey, system, user, 60);
 }
 
 export async function refineOutput(apiKey, originalOutput, instruction, type) {

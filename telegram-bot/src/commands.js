@@ -1,5 +1,5 @@
 import { searchCorpus, filterByAuthors, fitScore, formatResult } from "./vectorize.js";
-import { rewriteTweet, suggestReplies, summarizePattern, continueThread, learnStanceFromCorpus, analyzeWinners, generateLongContent, refineOutput } from "./claude.js";
+import { rewriteTweet, suggestReplies, summarizePattern, continueThread, learnStanceFromCorpus, analyzeWinners, generateLongContent, refineOutput, extractVoiceDelta } from "./claude.js";
 
 async function getTargets(kv) {
   const raw = await kv.get("targets");
@@ -23,6 +23,18 @@ async function getDrafts(kv) {
 
 async function saveLastOutput(kv, type, output, topic = "") {
   await kv.put("__last_output", JSON.stringify({ type, output, topic }));
+}
+
+async function getVoiceInsights(kv) {
+  const raw = await kv.get("__voice_insights");
+  return raw ? JSON.parse(raw) : [];
+}
+
+function textSimilarity(a, b) {
+  const wordsA = new Set((a.toLowerCase().match(/\w+/g) || []));
+  const wordsB = new Set((b.toLowerCase().match(/\w+/g) || []));
+  const intersection = [...wordsA].filter(w => wordsB.has(w)).length;
+  return intersection / Math.max(wordsA.size, wordsB.size, 1);
 }
 
 async function searchWeb(query, apiKey) {
@@ -179,7 +191,8 @@ export async function handleTweet(chatId, draft, env) {
   const targetMatches = filterByAuthors(results, targets).map(formatResult);
   const examples = targetMatches.length >= 3 ? targetMatches : formatted;
 
-  const rewritten = await rewriteTweet(CLAUDE_API_KEY, draft, examples);
+  const voiceInsights = await getVoiceInsights(TARGETS_KV);
+  const rewritten = await rewriteTweet(CLAUDE_API_KEY, draft, examples, voiceInsights);
 
   const scoreBar = score >= 70 ? "🟢" : score >= 40 ? "🟡" : "🔴";
   const targetNote = targets.length
@@ -235,8 +248,9 @@ export async function handleReply(chatId, arg, env) {
   const examples = targetMatches.length >= 3 ? targetMatches : formatted;
 
   const winners = await getWinners(TARGETS_KV);
+  const voiceInsights = await getVoiceInsights(TARGETS_KV);
   const webContext = useWeb ? await searchWeb(targetTweet, env.TAVILY_API_KEY) : null;
-  const replies = await suggestReplies(CLAUDE_API_KEY, targetTweet, examples, stance, winners, webContext);
+  const replies = await suggestReplies(CLAUDE_API_KEY, targetTweet, examples, stance, winners, webContext, voiceInsights);
 
   const stanceNote = stance ? `\n${i(`Arguing from: "${stance}"`)}` : "";
   const webNote = useWeb && webContext ? `\n${i("🌐 Live web context included")}` : "";
@@ -407,7 +421,7 @@ export async function handleStances(chatId, env) {
 }
 
 export async function handleWorked(chatId, arg, env) {
-  const { TELEGRAM_BOT_TOKEN, TARGETS_KV } = env;
+  const { TELEGRAM_BOT_TOKEN, CLAUDE_API_KEY, TARGETS_KV } = env;
   const reply = arg.trim();
 
   if (!reply) {
@@ -421,13 +435,31 @@ export async function handleWorked(chatId, arg, env) {
     return sendMessage(TELEGRAM_BOT_TOKEN, chatId, "Already saved as a winner.");
   }
 
-  winners.unshift(reply); // most recent first
-  // Keep last 50 winners
+  winners.unshift(reply);
   if (winners.length > 50) winners.splice(50);
   await TARGETS_KV.put("__winners", JSON.stringify(winners));
 
+  // Self-improvement: if this looks like an edited bot output, extract the delta
+  let learnedNote = "";
+  try {
+    const lastRaw = await TARGETS_KV.get("__last_output");
+    if (lastRaw) {
+      const { output } = JSON.parse(lastRaw);
+      const similarity = textSimilarity(reply, output);
+      const isEdited = reply.trim() !== output.trim();
+      if (similarity >= 0.25 && isEdited) {
+        const insight = await extractVoiceDelta(CLAUDE_API_KEY, output, reply);
+        const insights = await getVoiceInsights(TARGETS_KV);
+        insights.unshift(insight);
+        if (insights.length > 10) insights.splice(10);
+        await TARGETS_KV.put("__voice_insights", JSON.stringify(insights));
+        learnedNote = `\n${i(`Learned: "${insight}"`)}\n${i(`(${insights.length} voice insight${insights.length === 1 ? "" : "s"} accumulated)`)}`;
+      }
+    }
+  } catch { /* non-fatal */ }
+
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
-    `✅ Saved as a winner. You now have ${winners.length} high-performing repl${winners.length === 1 ? "y" : "ies"} in your training pool.`
+    `✅ Saved as a winner. You now have ${winners.length} high-performing repl${winners.length === 1 ? "y" : "ies"} in your training pool.${learnedNote}`
   );
 }
 
@@ -900,9 +932,10 @@ export async function handleLong(chatId, arg, env) {
   const stances = await getStances(TARGETS_KV);
   const stance = detectStance(topic, stances);
   const winners = await getWinners(TARGETS_KV);
+  const voiceInsights = await getVoiceInsights(TARGETS_KV);
   const webContext = useWeb ? await searchWeb(topic, env.TAVILY_API_KEY) : null;
 
-  const result = await generateLongContent(CLAUDE_API_KEY, topic, examples, stance, winners, format, webContext);
+  const result = await generateLongContent(CLAUDE_API_KEY, topic, examples, stance, winners, format, webContext, voiceInsights);
 
   const header = useEssay
     ? b(`Essay draft: ${topic}`)
