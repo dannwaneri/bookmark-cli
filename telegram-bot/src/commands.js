@@ -1,5 +1,5 @@
 import { searchCorpus, filterByAuthors, fitScore, formatResult } from "./vectorize.js";
-import { rewriteTweet, suggestReplies, summarizePattern, continueThread, learnStanceFromCorpus, analyzeWinners, generateLongContent } from "./claude.js";
+import { rewriteTweet, suggestReplies, summarizePattern, continueThread, learnStanceFromCorpus, analyzeWinners, generateLongContent, refineOutput } from "./claude.js";
 
 async function getTargets(kv) {
   const raw = await kv.get("targets");
@@ -19,6 +19,10 @@ async function getWinners(kv) {
 async function getDrafts(kv) {
   const raw = await kv.get("__drafts");
   return raw ? JSON.parse(raw) : [];
+}
+
+async function saveLastOutput(kv, type, output, topic = "") {
+  await kv.put("__last_output", JSON.stringify({ type, output, topic }));
 }
 
 async function searchWeb(query, apiKey) {
@@ -153,6 +157,7 @@ ${b("Commands:")}
 /trending <code>&lt;topic&gt;</code> — most-liked on a specific topic
 /draft <code>&lt;text&gt;</code> — save a draft · /draft list · /draft pick &lt;n&gt;
 /long <code>&lt;topic&gt;</code> — write a thread · add --essay for essay draft · add --web for live context
+/refine <code>&lt;instruction&gt;</code> — reshape last output (shorter · harder · more specific · etc.)
 /backup — export all stances, targets, and winners to KV`;
 
   await sendMessage(token, chatId, msg);
@@ -196,6 +201,7 @@ ${rewritten}
 ${examplesBlock}`;
 
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId, msg);
+  await saveLastOutput(TARGETS_KV, "tweet", rewritten, draft).catch(() => {});
 }
 
 export async function handleReply(chatId, arg, env) {
@@ -241,6 +247,7 @@ ${replies}
 ${i("Based on style patterns from your bookmark corpus")}${stanceNote}${webNote}`;
 
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId, msg);
+  await saveLastOutput(TARGETS_KV, "reply", replies, targetTweet).catch(() => {});
 }
 
 export async function handleSearch(chatId, query, env) {
@@ -906,6 +913,35 @@ export async function handleLong(chatId, arg, env) {
 
   await sendLongMessage(TELEGRAM_BOT_TOKEN, chatId, `${header}\n\n${result}${stanceNote}${webNote}`);
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
-    i("From your corpus · /tweet to polish · /draft to save any section")
+    i("From your corpus · /tweet to polish · /draft to save any section · /refine to reshape")
   );
+  await saveLastOutput(TARGETS_KV, format, result, topic).catch(() => {});
+}
+
+export async function handleRefine(chatId, instruction, env) {
+  const { TELEGRAM_BOT_TOKEN, CLAUDE_API_KEY, TARGETS_KV } = env;
+
+  if (!instruction.trim()) {
+    return sendMessage(TELEGRAM_BOT_TOKEN, chatId,
+      `Usage: /refine ${code("instruction")}\n\nExamples:\n/refine shorter\n/refine more aggressive\n/refine focus on Nigeria\n\nRuns on the last output from /reply, /tweet, or /long.`
+    );
+  }
+
+  const raw = await TARGETS_KV.get("__last_output");
+  if (!raw) {
+    return sendMessage(TELEGRAM_BOT_TOKEN, chatId,
+      `No previous output to refine. Run /reply, /tweet, or /long first.`
+    );
+  }
+
+  const { type, output, topic } = JSON.parse(raw);
+  await sendMessage(TELEGRAM_BOT_TOKEN, chatId, `⏳ Refining (${instruction})...`);
+
+  const revised = await refineOutput(CLAUDE_API_KEY, output, instruction, type);
+
+  const typeLabel = type === "essay" ? "Essay" : type === "thread" ? "Thread" : type === "tweet" ? "Rewrite" : "Replies";
+  await sendLongMessage(TELEGRAM_BOT_TOKEN, chatId, `${b(`${typeLabel} (refined: ${instruction})`)}\n\n${revised}`);
+  await sendMessage(TELEGRAM_BOT_TOKEN, chatId, i("/refine again to keep shaping · /draft to save"));
+
+  await saveLastOutput(TARGETS_KV, type, revised, topic).catch(() => {});
 }

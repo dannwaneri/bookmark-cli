@@ -239,6 +239,27 @@ Write an essay on: "${topic}"`;
   return callClaude(apiKey, system, user, 2048);
 }
 
+export async function refineOutput(apiKey, originalOutput, instruction, type) {
+  const typeLabel = type === "essay" ? "essay" : type === "thread" ? "Twitter thread" : type === "tweet" ? "tweet rewrite" : "reply options";
+  const maxTokens = type === "essay" ? 2048 : type === "thread" ? 1024 : 512;
+
+  const system = `You are a writing editor. Revise the ${typeLabel} based on a specific instruction while preserving the author's voice.
+
+${VOICE_RULES}
+
+Rules:
+- Apply the instruction precisely — don't rewrite everything, just what it targets
+- Keep the same structure (numbered tweets stay numbered, essay sections stay sectioned)
+- Return only the revised content. No explanation, no preamble.`;
+
+  const user = `Original ${typeLabel}:
+${originalOutput}
+
+Instruction: ${instruction}`;
+
+  return callClaude(apiKey, system, user, maxTokens);
+}
+
 export async function summarizePattern(apiKey, examples) {
   const exampleBlock = examples
     .slice(0, 10)
