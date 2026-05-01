@@ -80,6 +80,26 @@ async function sendMessage(token, chatId, text, parseMode = "HTML") {
   }
 }
 
+// Split long text into ≤4000-char chunks on paragraph boundaries, send sequentially
+async function sendLongMessage(token, chatId, text, parseMode = "HTML") {
+  const LIMIT = 4000;
+  if (text.length <= LIMIT) {
+    return sendMessage(token, chatId, text, parseMode);
+  }
+  const paragraphs = text.split(/\n\n+/);
+  let chunk = "";
+  for (const para of paragraphs) {
+    const candidate = chunk ? chunk + "\n\n" + para : para;
+    if (candidate.length > LIMIT) {
+      if (chunk) await sendMessage(token, chatId, chunk, parseMode);
+      chunk = para.length > LIMIT ? para.slice(0, LIMIT) : para;
+    } else {
+      chunk = candidate;
+    }
+  }
+  if (chunk) await sendMessage(token, chatId, chunk, parseMode);
+}
+
 function b(text) { return `<b>${text}</b>`; }
 function i(text) { return `<i>${text}</i>`; }
 function code(text) { return `<code>${text}</code>`; }
@@ -861,8 +881,8 @@ export async function handleLong(chatId, arg, env) {
   const stanceNote = stance ? `\n${i(`Arguing from your saved stance`)}` : "";
   const webNote = useWeb && webContext ? `\n${i("🌐 Live web context included")}` : "";
 
-  await sendMessage(TELEGRAM_BOT_TOKEN, chatId, `${header}\n\n${result}${stanceNote}${webNote}`);
+  await sendLongMessage(TELEGRAM_BOT_TOKEN, chatId, `${header}\n\n${result}${stanceNote}${webNote}`);
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
-    i("From your corpus · /tweet to polish a tweet · /draft <text> to save anything")
+    i("From your corpus · /tweet to polish · /draft to save any section")
   );
 }
