@@ -1,5 +1,5 @@
 import { searchCorpus, filterByAuthors, fitScore, formatResult } from "./vectorize.js";
-import { rewriteTweet, suggestReplies, summarizePattern, continueThread, learnStanceFromCorpus, analyzeWinners } from "./claude.js";
+import { rewriteTweet, suggestReplies, summarizePattern, continueThread, learnStanceFromCorpus, analyzeWinners, generateLongContent } from "./claude.js";
 
 async function getTargets(kv) {
   const raw = await kv.get("targets");
@@ -109,6 +109,7 @@ ${b("Commands:")}
 /trending — most-liked tweets across your corpus
 /trending <code>&lt;topic&gt;</code> — most-liked on a specific topic
 /draft <code>&lt;text&gt;</code> — save a draft · /draft list · /draft pick &lt;n&gt;
+/long <code>&lt;topic&gt;</code> — write a thread · add --essay for essay draft · add --web for live context
 /backup — export all stances, targets, and winners to KV`;
 
   await sendMessage(token, chatId, msg);
@@ -810,4 +811,58 @@ export async function handlePattern(chatId, topic, env) {
   const pattern = await summarizePattern(CLAUDE_API_KEY, examples);
 
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId, `${b(`What works on "${topic}":`)}\n\n${pattern}`);
+}
+
+export async function handleLong(chatId, arg, env) {
+  const { TELEGRAM_BOT_TOKEN, VECTORIZE_API_KEY, CLAUDE_API_KEY, TARGETS_KV } = env;
+
+  if (!arg.trim()) {
+    return sendMessage(TELEGRAM_BOT_TOKEN, chatId,
+      `Usage:\n/long ${code("topic")} — write a Twitter thread\n/long ${code("topic --essay")} — write an essay draft\n\nAdd ${code("--web")} for live context on either.`
+    );
+  }
+
+  const useEssay = /--essay\b/i.test(arg);
+  const useWeb = /--web\b/i.test(arg);
+  const topic = arg.replace(/--essay\b/gi, "").replace(/--web\b/gi, "").trim();
+  const format = useEssay ? "essay" : "thread";
+
+  await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
+    useWeb
+      ? `⏳ Searching web + drafting ${format} on "${topic}"...`
+      : `⏳ Drafting ${format} on "${topic}"...`
+  );
+
+  const [r1, r2, r3] = await Promise.all([
+    searchCorpus(topic, { vectorizeWorker: env.VECTORIZE_WORKER, vectorizeApiKey: VECTORIZE_API_KEY, limit: 20 }),
+    searchCorpus(`${topic} opinion argument`, { vectorizeWorker: env.VECTORIZE_WORKER, vectorizeApiKey: VECTORIZE_API_KEY, limit: 20 }),
+    searchCorpus(`${topic} example evidence`, { vectorizeWorker: env.VECTORIZE_WORKER, vectorizeApiKey: VECTORIZE_API_KEY, limit: 20 }),
+  ]);
+
+  const seen = new Set();
+  const allResults = [];
+  for (const r of [...r1, ...r2, ...r3].map(formatResult)) {
+    const key = r.text.slice(0, 60);
+    if (!seen.has(key)) { seen.add(key); allResults.push(r); }
+  }
+  const examples = allResults.slice(0, 10);
+
+  const stances = await getStances(TARGETS_KV);
+  const stance = detectStance(topic, stances);
+  const winners = await getWinners(TARGETS_KV);
+  const webContext = useWeb ? await searchWeb(topic, env.TAVILY_API_KEY) : null;
+
+  const result = await generateLongContent(CLAUDE_API_KEY, topic, examples, stance, winners, format, webContext);
+
+  const header = useEssay
+    ? b(`Essay draft: ${topic}`)
+    : b(`Thread: ${topic}`);
+
+  const stanceNote = stance ? `\n${i(`Arguing from your saved stance`)}` : "";
+  const webNote = useWeb && webContext ? `\n${i("🌐 Live web context included")}` : "";
+
+  await sendMessage(TELEGRAM_BOT_TOKEN, chatId, `${header}\n\n${result}${stanceNote}${webNote}`);
+  await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
+    i("From your corpus · /tweet to polish a tweet · /draft <text> to save anything")
+  );
 }

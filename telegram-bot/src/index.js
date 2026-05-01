@@ -20,6 +20,7 @@ import {
   handleRestore,
   handleDraft,
   handleTrending,
+  handleLong,
 } from "./commands.js";
 
 export default {
@@ -133,6 +134,9 @@ async function dispatch(cmd, arg, chatId, env) {
         break;
       case "/trending":
         await handleTrending(chatId, arg, env);
+        break;
+      case "/long":
+        await handleLong(chatId, arg, env);
         break;
       default:
         break;

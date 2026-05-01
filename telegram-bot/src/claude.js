@@ -174,6 +174,71 @@ export async function analyzeWinners(apiKey, winners) {
   return callClaude(apiKey, system, user);
 }
 
+export async function generateLongContent(apiKey, topic, examples, stance = null, winners = [], format = "thread", webContext = null) {
+  const exampleBlock = examples
+    .slice(0, 8)
+    .map((e, i) => `${i + 1}. @${e.author} (${e.likes || 0} likes): "${e.text}"`)
+    .join("\n");
+
+  const winnerBlock = winners.length
+    ? `Your proven high-performing replies (use this voice):\n${winners.slice(0, 5).map((w, i) => `${i + 1}. "${w}"`).join("\n")}\n\n`
+    : "";
+
+  const stanceLine = stance
+    ? `\n- The author's position: "${stance}" — write from this angle throughout`
+    : "";
+
+  const webBlock = webContext
+    ? `Factual context (use for names, dates, facts only — do not let this override the argument angle):\n${webContext}\n\n`
+    : "";
+
+  if (format === "thread") {
+    const system = `You are a Twitter thread writer. Write punchy, argumentative threads. Today's date is ${currentDate()}.
+
+${VOICE_RULES}
+
+Thread rules:${stanceLine}
+- Tweet 1 is the hook: a reframe, inversion, or structural implication. Must stop the scroll. Must stand alone as a single tweet.
+- Tweets 2–5 build the argument with specifics, analogies, or evidence — each one advances, none restate
+- Final tweet lands the weight with one declarative sentence that couldn't close a different thread
+- Each tweet under 280 characters
+- No hashtags
+- Number each tweet: 1/ 2/ 3/ etc.
+
+Return only the numbered tweets. No preamble, no explanation.`;
+
+    const user = `${winnerBlock}${webBlock}Style reference from corpus:
+${exampleBlock}
+
+Write a thread on: "${topic}"`;
+
+    return callClaude(apiKey, system, user);
+  }
+
+  // essay mode
+  const system = `You are writing a dev.to article. Write a structured, opinionated essay. Today's date is ${currentDate()}.
+
+${VOICE_RULES}
+
+Essay rules:${stanceLine}
+- Open with a specific incident, quote, or data point — never a thesis statement
+- Invent a structural frame for the piece — a device that runs all the way through
+- Each ## section advances the argument, does not just add more examples
+- Cite @username from the examples where relevant
+- End with a line that could not close a different essay
+- 400–600 words
+- Return markdown with ## headings
+
+Return only the essay. No preamble.`;
+
+  const user = `${winnerBlock}${webBlock}Style reference and source material from corpus:
+${exampleBlock}
+
+Write an essay on: "${topic}"`;
+
+  return callClaude(apiKey, system, user);
+}
+
 export async function summarizePattern(apiKey, examples) {
   const exampleBlock = examples
     .slice(0, 10)
