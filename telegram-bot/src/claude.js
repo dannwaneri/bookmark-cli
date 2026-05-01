@@ -14,7 +14,7 @@ const VOICE_RULES = `Voice rules (non-negotiable):
 - No em-dash drama. No rhetorical questions as openers. No passive voice hedging
 - 2–4 sentences total. Earn attention by refusing to overstay it`;
 
-async function callClaude(apiKey, systemPrompt, userMessage) {
+async function callClaude(apiKey, systemPrompt, userMessage, maxTokens = 512) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: {
@@ -24,7 +24,7 @@ async function callClaude(apiKey, systemPrompt, userMessage) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 512,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     }),
@@ -212,7 +212,7 @@ ${exampleBlock}
 
 Write a thread on: "${topic}"`;
 
-    return callClaude(apiKey, system, user);
+    return callClaude(apiKey, system, user, 1024);
   }
 
   // essay mode
@@ -236,7 +236,7 @@ ${exampleBlock}
 
 Write an essay on: "${topic}"`;
 
-  return callClaude(apiKey, system, user);
+  return callClaude(apiKey, system, user, 2048);
 }
 
 export async function summarizePattern(apiKey, examples) {
