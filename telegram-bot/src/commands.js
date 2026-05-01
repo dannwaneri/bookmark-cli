@@ -80,19 +80,42 @@ async function sendMessage(token, chatId, text, parseMode = "HTML") {
   }
 }
 
-// Split long text into ≤4000-char chunks on paragraph boundaries, send sequentially
+// Split long text into ≤4000-char chunks on paragraph → sentence boundaries, send sequentially
 async function sendLongMessage(token, chatId, text, parseMode = "HTML") {
   const LIMIT = 4000;
   if (text.length <= LIMIT) {
     return sendMessage(token, chatId, text, parseMode);
   }
-  const paragraphs = text.split(/\n\n+/);
+
+  // Break into segments: try paragraphs first, then sentences for any oversized paragraph
+  const segments = [];
+  for (const para of text.split(/\n\n+/)) {
+    if (para.length <= LIMIT) {
+      segments.push(para);
+    } else {
+      // Split oversized paragraph at sentence boundaries
+      const sentences = para.match(/[^.!?]+[.!?]+["']?|[^.!?]+$/g) || [para];
+      let sub = "";
+      for (const s of sentences) {
+        const candidate = sub ? sub + " " + s : s;
+        if (candidate.length > LIMIT) {
+          if (sub) segments.push(sub.trim());
+          sub = s.length > LIMIT ? s.slice(0, LIMIT) : s;
+        } else {
+          sub = candidate;
+        }
+      }
+      if (sub) segments.push(sub.trim());
+    }
+  }
+
+  // Merge small segments into messages up to LIMIT
   let chunk = "";
-  for (const para of paragraphs) {
-    const candidate = chunk ? chunk + "\n\n" + para : para;
+  for (const seg of segments) {
+    const candidate = chunk ? chunk + "\n\n" + seg : seg;
     if (candidate.length > LIMIT) {
       if (chunk) await sendMessage(token, chatId, chunk, parseMode);
-      chunk = para.length > LIMIT ? para.slice(0, LIMIT) : para;
+      chunk = seg;
     } else {
       chunk = candidate;
     }
