@@ -1,5 +1,5 @@
 import { searchCorpus, filterByAuthors, fitScore, formatResult } from "./vectorize.js";
-import { rewriteTweet, suggestReplies, summarizePattern, continueThread, learnStanceFromCorpus, analyzeWinners, generateLongContent, refineOutput, extractVoiceDelta } from "./claude.js";
+import { rewriteTweet, suggestReplies, summarizePattern, continueThread, learnStanceFromCorpus, analyzeWinners, generateLongContent, refineOutput, extractVoiceDelta, validateStance, analyzeTweet } from "./claude.js";
 
 async function getTargets(kv) {
   const raw = await kv.get("targets");
@@ -51,15 +51,20 @@ async function searchWeb(query, apiKey) {
         include_answer: true,
       }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error("Tavily error:", res.status, await res.text().catch(() => ""));
+      return null;
+    }
     const data = await res.json();
+    console.log("Tavily results:", data.results?.length ?? 0, "answer:", !!data.answer);
     const parts = [];
     if (data.answer) parts.push(data.answer);
     if (data.results?.length) {
       parts.push(data.results.slice(0, 2).map(r => `• ${r.title}: ${(r.content || "").slice(0, 200)}`).join("\n"));
     }
     return parts.join("\n\n") || null;
-  } catch {
+  } catch (e) {
+    console.error("Tavily exception:", e.message);
     return null;
   }
 }
@@ -74,7 +79,8 @@ function detectStance(tweet, stances) {
     const score = keywords.filter(k =>
       new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text)
     ).length;
-    if (score >= 2 && score > bestScore) { bestScore = score; best = stance; }
+    const threshold = keywords.length <= 2 ? 1 : 2;
+    if (score >= threshold && score > bestScore) { bestScore = score; best = stance; }
   }
   return best;
 }
@@ -226,20 +232,26 @@ export async function handleReply(chatId, arg, env) {
     );
   }
 
-  // Extract --web flag before any other parsing
-  const useWeb = /--web\b/i.test(arg);
-  const cleanArg = arg.replace(/\s*--web\b/i, "").trim();
+  // Extract --web flag before any other parsing (accept em-dash —web from mobile autocorrect)
+  const useWeb = /(--|—)web\b/i.test(arg);
+  const cleanArg = arg.replace(/\s*(--|—)web\b/i, "").trim();
 
   // Parse optional stance after "--" or "—" (spaces optional)
   const stanceSplit = cleanArg.split(/\s*--\s*|\s+—\s+/);
   const targetTweet = stanceSplit[0].trim();
   const explicitStance = stanceSplit.length > 1 ? stanceSplit.slice(1).join(" ").trim() : null;
 
-  // Fall back to saved stances if no explicit stance given
-  const stances = await getStances(TARGETS_KV);
-  const stance = explicitStance || detectStance(targetTweet, stances);
-
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId, useWeb ? "⏳ Searching web + drafting replies..." : "⏳ Drafting replies...");
+
+  // Resolve stance and analyze tweet sentiment/register in parallel
+  const stances = await getStances(TARGETS_KV);
+  const candidateStance = explicitStance || detectStance(targetTweet, stances);
+  const needsValidation = !explicitStance && candidateStance && targetTweet.length >= 200;
+
+  const [stance, { sentiment, register }] = await Promise.all([
+    needsValidation ? validateStance(CLAUDE_API_KEY, targetTweet, candidateStance) : Promise.resolve(candidateStance),
+    analyzeTweet(CLAUDE_API_KEY, targetTweet),
+  ]);
 
   const targets = await getTargets(TARGETS_KV);
   const results = await searchCorpus(targetTweet, { vectorizeWorker: env.VECTORIZE_WORKER, vectorizeApiKey: VECTORIZE_API_KEY });
@@ -250,15 +262,16 @@ export async function handleReply(chatId, arg, env) {
   const winners = await getWinners(TARGETS_KV);
   const voiceInsights = await getVoiceInsights(TARGETS_KV);
   const webContext = useWeb ? await searchWeb(targetTweet, env.TAVILY_API_KEY) : null;
-  const replies = await suggestReplies(CLAUDE_API_KEY, targetTweet, examples, stance, winners, webContext, voiceInsights);
+  const replies = await suggestReplies(CLAUDE_API_KEY, targetTweet, examples, stance, winners, webContext, voiceInsights, sentiment, register);
 
   const stanceNote = stance ? `\n${i(`Arguing from: "${stance}"`)}` : "";
+  const registerNote = register === "pidgin" ? `\n${i("Pidgin register matched")}` : "";
   const webNote = useWeb && webContext ? `\n${i("🌐 Live web context included")}` : "";
   const msg = `${b("3 reply options:")}
 
 ${replies}
 
-${i("Based on style patterns from your bookmark corpus")}${stanceNote}${webNote}`;
+${i("Based on style patterns from your bookmark corpus")}${stanceNote}${registerNote}${webNote}`;
 
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId, msg);
   await saveLastOutput(TARGETS_KV, "reply", replies, targetTweet).catch(() => {});
@@ -555,9 +568,9 @@ export async function handleRemoveStance(chatId, arg, env) {
 export async function handleThread(chatId, arg, env) {
   const { TELEGRAM_BOT_TOKEN, VECTORIZE_API_KEY, CLAUDE_API_KEY, TARGETS_KV } = env;
 
-  // Extract --web flag
-  const useWeb = /--web\b/i.test(arg);
-  const cleanArg = arg.replace(/\s*--web\b/i, "").trim();
+  // Extract --web flag (accept em-dash —web from mobile autocorrect)
+  const useWeb = /(--|—)web\b/i.test(arg);
+  const cleanArg = arg.replace(/\s*(--|—)web\b/i, "").trim();
 
   // Parse: "Your reply: ...\nTheir reply: ..."
   const yourMatch = cleanArg.match(/your\s*reply\s*:\s*(.+?)(?=their\s*reply\s*:|$)/is);
@@ -646,7 +659,7 @@ export async function handleRefresh(chatId, env) {
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId, `⏳ Scanning corpus from ${targets.length} target accounts...`);
 
   const queries = [
-    "opinions technology AI startup founders",
+    "opinions technology CLAUDE_API_KEY startup founders",
     "football soccer premier league match",
     "Nigeria politics economy president",
     "investing finance markets money",
@@ -833,7 +846,7 @@ export async function handleTrending(chatId, arg, env) {
   const queries = topic
     ? [topic]
     : [
-        "best insights opinions technology AI",
+        "best insights opinions technology CLAUDE_API_KEY",
         "Nigeria government politics economy",
         "football premier league champions league",
         "investing finance markets entrepreneurship",
@@ -904,9 +917,9 @@ export async function handleLong(chatId, arg, env) {
     );
   }
 
-  const useEssay = /--essay\b/i.test(arg);
-  const useWeb = /--web\b/i.test(arg);
-  const topic = arg.replace(/--essay\b/gi, "").replace(/--web\b/gi, "").trim();
+  const useEssay = /(--|—)essay\b/i.test(arg);
+  const useWeb = /(--|—)web\b/i.test(arg);
+  const topic = arg.replace(/(--|—)essay\b/gi, "").replace(/(--|—)web\b/gi, "").trim();
   const format = useEssay ? "essay" : "thread";
 
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId,

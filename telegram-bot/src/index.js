@@ -147,13 +147,13 @@ async function dispatch(cmd, arg, chatId, env) {
     }
   } catch (err) {
     console.error("Command error:", err);
+    const text = err.code === "CREDITS_EXHAUSTED"
+      ? "⚠️ Claude API credits exhausted. Top up at console.anthropic.com/settings/billing — no redeploy needed once you do."
+      : `⚠️ Something went wrong: ${err.message}`;
     await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `⚠️ Something went wrong: ${err.message}`,
-      }),
+      body: JSON.stringify({ chat_id: chatId, text }),
     });
   }
 }

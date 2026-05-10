@@ -9,3 +9,6 @@ id = "ad6cb6f820074d61bb990a9e2fe8875d"
 [[services]]
 binding = "VECTORIZE_WORKER"
 service = "vectorize-mcp-worker"
+
+[ai]
+binding = "AI"
