@@ -331,6 +331,15 @@ def get_stats() -> dict:
     }
 
 
+def get_counts_by_source() -> dict:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT source, COUNT(*) as cnt FROM bookmarks GROUP BY source")
+    rows = cur.fetchall()
+    conn.close()
+    return {row["source"]: row["cnt"] for row in rows}
+
+
 def get_existing_ids() -> set[str]:
     conn = get_connection()
     cur = conn.cursor()

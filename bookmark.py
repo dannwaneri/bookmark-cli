@@ -361,6 +361,95 @@ def stats():
 
 
 @cli.command()
+def status():
+    """Show sync status and database counts at a glance."""
+    import re
+    from datetime import date
+
+    log_path = Path(__file__).parent / "logs" / "sync.log"
+
+    last_sync_dt = None
+    last_new_bookmarks = None
+    last_new_likes = None
+    last_vectors = None
+    last_reflected = None
+
+    if log_path.exists():
+        text = log_path.read_text(encoding="utf-8", errors="ignore")
+
+        complete_matches = list(re.finditer(r'\[(\w+ \d+/\d+/\d+\s+[\d:\.]+)\] Daily sync complete', text))
+        start_matches = list(re.finditer(r'\[.*?\] Starting daily sync', text))
+
+        if complete_matches:
+            last_complete = complete_matches[-1]
+            dt_str = re.sub(r'\s+', ' ', last_complete.group(1).strip())
+            for fmt in ("%a %m/%d/%Y %H:%M:%S.%f", "%a %m/%d/%Y %H:%M:%S"):
+                try:
+                    last_sync_dt = datetime.strptime(dt_str, fmt)
+                    break
+                except ValueError:
+                    continue
+
+            if start_matches:
+                block = text[start_matches[-1].start():last_complete.end()]
+
+                hits = list(re.finditer(r'Done![\s\-]+(\d+) new\s+\d+ skipped', block))
+                if len(hits) >= 1:
+                    last_new_bookmarks = int(hits[0].group(1))
+                if len(hits) >= 2:
+                    last_new_likes = int(hits[1].group(1))
+
+                m = re.search(r'Ingested:\s+([\d,]+)', block)
+                if m:
+                    last_vectors = int(m.group(1).replace(',', ''))
+
+                m = re.search(r'Reflected:\s+([\d,]+)', block)
+                if m:
+                    last_reflected = int(m.group(1).replace(',', ''))
+
+    counts = db.get_counts_by_source()
+    bm_total = counts.get("bookmark", 0)
+    likes_total = counts.get("like", 0)
+    vec_total = db.vectorized_count()
+
+    today = date.today()
+    ran_today = last_sync_dt is not None and last_sync_dt.date() == today
+
+    if last_sync_dt:
+        sync_str = last_sync_dt.strftime("%a %b %d  %I:%M %p")
+        if ran_today:
+            sync_line = f"[green]{sync_str}  ✓[/]"
+        else:
+            days_ago = (today - last_sync_dt.date()).days
+            ago = "yesterday" if days_ago == 1 else f"{days_ago}d ago"
+            sync_line = f"[yellow]{sync_str}[/]  [dim]({ago})[/]"
+    else:
+        sync_line = "[dim]No log found[/]"
+
+    today_line = "[green]✓  Ran today[/]" if ran_today else "[red]✗  Not run yet[/]"
+
+    def delta(n):
+        return f"   [dim](+{n:,} last run)[/]" if n is not None else ""
+
+    lines = [
+        f"  [bold]Last sync[/]      {sync_line}",
+        f"  [bold]Today[/]          {today_line}",
+        "",
+        f"  [bold]Bookmarks[/]      [cyan]{bm_total:,}[/]{delta(last_new_bookmarks)}",
+        f"  [bold]Likes[/]          [cyan]{likes_total:,}[/]{delta(last_new_likes)}",
+        f"  [bold]Vectors[/]        [cyan]{vec_total:,}[/]" + (f"   [dim]({last_vectors:,} ingested last run)[/]" if last_vectors else ""),
+        f"  [bold]Reflections[/]    " + (f"[dim]{last_reflected:,} last run[/]" if last_reflected is not None else "[dim]—[/]"),
+    ]
+
+    console.print(Panel(
+        "\n".join(lines),
+        title="[bold]Bookmark CLI — Status[/]",
+        border_style="cyan",
+        padding=(1, 2),
+    ))
+
+
+@cli.command()
 @click.argument("topic")
 @click.option("--limit", default=100, show_default=True, help="Bookmarks to scan.")
 @click.option("--author", default=None, help="Only from a specific author.")
@@ -738,6 +827,58 @@ def reflect(batch: int, runs: int):
         f"  Failed:    [dim]{total_failed:,}[/]",
         border_style="green",
     ))
+
+
+@cli.command("daily")
+@click.option("--reflect-runs", default=2, show_default=True, help="Reflect batches to run after sync.")
+def daily(reflect_runs: int):
+    """Sync new tweets, ingest to vector index, and reflect. Run this once a day."""
+    from click.testing import CliRunner
+    runner = CliRunner()
+
+    console.print(Panel("[bold cyan]Daily sync — sync → ingest → reflect[/]", border_style="cyan"))
+
+    console.print("\n[bold]Step 1/3:[/] Syncing from X...")
+    result = runner.invoke(cli, ["sync"])
+    console.print(result.output.strip())
+
+    console.print("\n[bold]Step 2/3:[/] Ingesting to vector index...")
+    result = runner.invoke(cli, ["ingest-vector"])
+    console.print(result.output.strip())
+
+    console.print("\n[bold]Step 3/3:[/] Reflecting new docs...")
+    result = runner.invoke(cli, ["reflect", "--batch", "5", "--runs", str(reflect_runs)])
+    console.print(result.output.strip())
+
+    console.print("\n[green]Done.[/] Run [cyan]python bookmark.py reflect-status[/] to check progress.")
+
+
+@cli.command("reflect-status")
+def reflect_status():
+    """Show Gemma 4 reflection count vs total reflections."""
+    import subprocess
+    sql = (
+        "SELECT "
+        "(SELECT COUNT(*) FROM documents WHERE doc_type='reflection' AND created_at>='2026-05-10') as gemma4, "
+        "(SELECT COUNT(*) FROM documents WHERE doc_type='reflection') as total, "
+        "(SELECT COUNT(*) FROM documents WHERE doc_type='raw' AND last_reflected_at IS NULL) as unreflected"
+    )
+    result = subprocess.run(
+        f'wrangler d1 execute mcp-knowledge-db --remote --command "{sql}"',
+        capture_output=True, shell=True, encoding='utf-8', errors='replace'
+    )
+    import re, json as _json
+    match = re.search(r'\[.*\]', result.stdout, re.DOTALL)
+    if match:
+        try:
+            data = _json.loads(match.group())[0]["results"][0]
+            console.print(f"[bold]Gemma 4 reflections:[/] [cyan]{data['gemma4']}[/]")
+            console.print(f"[bold]Total reflections:   [/] [dim]{data['total']}[/]")
+            console.print(f"[bold]Unreflected raw docs:[/] [dim]{data['unreflected']}[/]")
+        except Exception:
+            console.print(result.stdout[-800:])
+    else:
+        console.print(result.stdout[-800:] or result.stderr[-400:])
 
 
 @cli.command("semantic-hooks")
