@@ -70,19 +70,35 @@ async function searchWeb(query, apiKey) {
 }
 
 function detectStance(tweet, stances) {
+  return detectStanceWithMeta(tweet, stances).stance;
+}
+
+function detectStanceWithMeta(tweet, stances) {
   const text = tweet.toLowerCase();
   let best = null;
-  let bestScore = 0;
+  let bestRatio = 0;
+  let bestFreq = 0;
+  let bestKeywords = [];
   for (const [topic, stance] of Object.entries(stances)) {
     const keywords = topic.toLowerCase().split(/[\s,]+/).filter(k => k.length >= 3);
     if (!keywords.length) continue;
-    const score = keywords.filter(k =>
+    const matched = keywords.filter(k =>
       new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text)
-    ).length;
+    );
+    const score = matched.length;
     const threshold = keywords.length <= 2 ? 1 : 2;
-    if (score >= threshold && score > bestScore) { bestScore = score; best = stance; }
+    if (score < threshold) continue;
+    const ratio = score / keywords.length;
+    // Tiebreaker: total occurrences of matched keywords in the tweet
+    const freq = matched.reduce((n, k) => {
+      const re = new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+      return n + (text.match(re)?.length ?? 0);
+    }, 0);
+    if (ratio > bestRatio || (ratio === bestRatio && freq > bestFreq)) {
+      bestRatio = ratio; bestFreq = freq; best = stance; bestKeywords = keywords;
+    }
   }
-  return best;
+  return { stance: best, keywords: bestKeywords };
 }
 
 async function sendMessage(token, chatId, text, parseMode = "HTML") {
@@ -245,8 +261,11 @@ export async function handleReply(chatId, arg, env) {
 
   // Resolve stance and analyze tweet sentiment/register in parallel
   const stances = await getStances(TARGETS_KV);
-  const candidateStance = explicitStance || detectStance(targetTweet, stances);
-  const needsValidation = !explicitStance && candidateStance && targetTweet.length >= 200;
+  const { stance: candidateStance, keywords: stanceKeywords } = explicitStance
+    ? { stance: explicitStance, keywords: [] }
+    : detectStanceWithMeta(targetTweet, stances);
+  // Skip validation for single-keyword stances — the match is already unambiguous
+  const needsValidation = !explicitStance && candidateStance && targetTweet.length >= 200 && stanceKeywords.length >= 2;
 
   const [stance, { sentiment, register }] = await Promise.all([
     needsValidation ? validateStance(CLAUDE_API_KEY, targetTweet, candidateStance) : Promise.resolve(candidateStance),
