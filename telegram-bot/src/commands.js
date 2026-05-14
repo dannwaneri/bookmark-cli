@@ -995,14 +995,14 @@ export async function handleReflect(chatId, topic, env) {
   const results = await searchCorpus(query, {
     vectorizeWorker: env.VECTORIZE_WORKER,
     vectorizeApiKey: VECTORIZE_API_KEY,
-    limit: 100,
-    filter: { doc_type: { "$eq": "reflection" } },
+    limit: 50,
   });
 
   const cutover = new Date('2026-05-10');
   const gemma4 = results.filter(r => {
     const raw = r.metadata?.created_at;
-    return raw && new Date(raw) >= cutover && (r.text ?? r.content ?? '').length >= 80;
+    const isReflection = (r.metadata?.doc_type ?? r.metadata?.docType ?? '') === 'reflection';
+    return raw && isReflection && new Date(raw) >= cutover && (r.text ?? r.content ?? '').length >= 80;
   });
 
   if (!gemma4.length) {
