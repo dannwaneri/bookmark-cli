@@ -22,6 +22,7 @@ import {
   handleTrending,
   handleLong,
   handleRefine,
+  handleReflect,
 } from "./commands.js";
 
 export default {
@@ -141,6 +142,9 @@ async function dispatch(cmd, arg, chatId, env) {
         break;
       case "/refine":
         await handleRefine(chatId, arg, env);
+        break;
+      case "/reflect":
+        await handleReflect(chatId, arg, env);
         break;
       default:
         break;

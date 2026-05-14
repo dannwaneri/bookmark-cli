@@ -1,19 +1,16 @@
 const MAX_SCORE = 2.0;
 const VECTORIZE_INTERNAL_URL = "https://vectorize-mcp-worker.fpl-test.workers.dev/search";
 
-export async function searchCorpus(query, { vectorizeWorker, vectorizeApiKey, limit = 15 }) {
+export async function searchCorpus(query, { vectorizeWorker, vectorizeApiKey, limit = 15, filter = null }) {
+  const body = { query, topK: Math.min(limit, 50), includeMetadata: true, rerank: true };
+  if (filter) body.filter = filter;
   const res = await vectorizeWorker.fetch(VECTORIZE_INTERNAL_URL, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${vectorizeApiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      query,
-      topK: Math.min(limit, 50),
-      includeMetadata: true,
-      rerank: true,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {

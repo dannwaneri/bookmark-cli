@@ -174,6 +174,7 @@ ${b("Commands:")}
 /tweet <code>&lt;your draft&gt;</code> — score + rewrite to fit your target accounts
 /reply <code>&lt;tweet&gt;</code> — get 3 reply options (add <code>--web</code> for live news context)
 /search <code>&lt;topic&gt;</code> — search your bookmark corpus
+/reflect — random Gemma 4 reflection from your knowledge base · /reflect <code>&lt;topic&gt;</code> for a specific one
 /targets — see your target accounts
 /addtarget <code>&lt;username&gt;</code> — add a target account
 /removetarget <code>&lt;username&gt;</code> — remove a target account
@@ -981,6 +982,37 @@ export async function handleLong(chatId, arg, env) {
     i("From your corpus · /tweet to polish · /draft to save any section · /refine to reshape")
   );
   await saveLastOutput(TARGETS_KV, format, result, topic).catch(() => {});
+}
+
+export async function handleReflect(chatId, topic, env) {
+  const { TELEGRAM_BOT_TOKEN, VECTORIZE_API_KEY } = env;
+  const query = topic.trim() || "insight synthesis knowledge connection pattern";
+
+  await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
+    topic ? `⏳ Finding reflections on "${topic}"...` : "⏳ Surfacing a reflection from your knowledge base..."
+  );
+
+  const results = await searchCorpus(query, {
+    vectorizeWorker: env.VECTORIZE_WORKER,
+    vectorizeApiKey: VECTORIZE_API_KEY,
+    limit: 20,
+    filter: { doc_type: { "$eq": "reflection" } },
+  });
+
+  if (!results.length) {
+    return sendMessage(TELEGRAM_BOT_TOKEN, chatId,
+      `No reflections found${topic ? ` on "${topic}"` : ""}. Run <code>python bookmark.py reflect</code> to generate some.`
+    );
+  }
+
+  // Pick randomly from top results for variety
+  const pick = results[Math.floor(Math.random() * Math.min(results.length, 10))];
+  const text = (pick.text ?? pick.content ?? "").replace(/\s*https?:\/\/\S+/g, "").trim();
+
+  const header = topic ? b(`Reflection on "${topic}":`) : b("From your knowledge base:");
+  const footer = i("Gemma 4 MoE synthesis · /reflect &lt;topic&gt; for a specific one · /reflect for another random");
+
+  await sendMessage(TELEGRAM_BOT_TOKEN, chatId, `${header}\n\n${i(`"${text}"`)}\n\n${footer}`);
 }
 
 export async function handleRefine(chatId, instruction, env) {
