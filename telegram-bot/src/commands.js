@@ -996,17 +996,21 @@ export async function handleReflect(chatId, topic, env) {
     vectorizeWorker: env.VECTORIZE_WORKER,
     vectorizeApiKey: VECTORIZE_API_KEY,
     limit: 20,
-    filter: { doc_type: { "$eq": "reflection" }, date_created: { "$gte": "2026-05-10" } },
+    filter: { doc_type: { "$eq": "reflection" } },
   });
 
-  if (!results.length) {
+  const gemma4 = results.filter(r =>
+    (r.metadata?.created_at ?? '') >= '2026-05-10' &&
+    (r.text ?? r.content ?? '').length >= 80
+  );
+
+  if (!gemma4.length) {
     return sendMessage(TELEGRAM_BOT_TOKEN, chatId,
-      `No reflections found${topic ? ` on "${topic}"` : ""}. Run <code>python bookmark.py reflect</code> to generate some.`
+      `No Gemma 4 reflections found${topic ? ` on "${topic}"` : ""}. Run more reflect batches to build up coverage.`
     );
   }
 
-  // Pick randomly from top results for variety
-  const pick = results[Math.floor(Math.random() * Math.min(results.length, 10))];
+  const pick = gemma4[Math.floor(Math.random() * Math.min(gemma4.length, 10))];
   const text = (pick.text ?? pick.content ?? "").replace(/\s*https?:\/\/\S+/g, "").trim();
 
   const header = topic ? b(`Reflection on "${topic}":`) : b("From your knowledge base:");
