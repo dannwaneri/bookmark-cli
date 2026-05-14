@@ -995,7 +995,7 @@ export async function handleReflect(chatId, topic, env) {
   const results = await searchCorpus(query, {
     vectorizeWorker: env.VECTORIZE_WORKER,
     vectorizeApiKey: VECTORIZE_API_KEY,
-    limit: 20,
+    limit: 100,
     filter: { doc_type: { "$eq": "reflection" } },
   });
 
