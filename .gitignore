@@ -7,3 +7,6 @@ venv/
 logs/*.log
 .claude/
 .wrangler/
+
+# Article drafts — keep local only
+*.md
