@@ -999,10 +999,11 @@ export async function handleReflect(chatId, topic, env) {
     filter: { doc_type: { "$eq": "reflection" } },
   });
 
-  const gemma4 = results.filter(r =>
-    (r.metadata?.created_at ?? '') >= '2026-05-10' &&
-    (r.text ?? r.content ?? '').length >= 80
-  );
+  const cutover = new Date('2026-05-10');
+  const gemma4 = results.filter(r => {
+    const raw = r.metadata?.created_at;
+    return raw && new Date(raw) >= cutover && (r.text ?? r.content ?? '').length >= 80;
+  });
 
   if (!gemma4.length) {
     return sendMessage(TELEGRAM_BOT_TOKEN, chatId,
