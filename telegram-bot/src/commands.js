@@ -996,7 +996,7 @@ export async function handleReflect(chatId, topic, env) {
     vectorizeWorker: env.VECTORIZE_WORKER,
     vectorizeApiKey: VECTORIZE_API_KEY,
     limit: 20,
-    filter: { doc_type: { "$eq": "reflection" } },
+    filter: { doc_type: { "$eq": "reflection" }, date_created: { "$gte": "2026-05-10" } },
   });
 
   if (!results.length) {
