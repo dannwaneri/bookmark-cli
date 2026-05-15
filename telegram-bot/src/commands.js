@@ -353,25 +353,41 @@ export async function handleAddTarget(chatId, username, env) {
   await TARGETS_KV.put("targets", JSON.stringify(targets));
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId, `✅ Added @${clean} to your target accounts. You now have ${targets.length} targets.`);
 
-  // Immediately show what we already have from this author in the corpus
+  // Show their content if it surfaces in a topic search
   try {
-    const results = await searchCorpus(clean, {
-      vectorizeWorker: env.VECTORIZE_WORKER,
-      vectorizeApiKey: VECTORIZE_API_KEY,
-      limit: 15,
-    });
-    const authorContent = filterByAuthors(results, [clean]).map(formatResult);
+    const probeQueries = [
+      "opinions technology startup founders",
+      "football soccer premier league match",
+      "Nigeria politics economy society",
+      "life relationships culture money",
+    ];
+    const allSearches = await Promise.all(
+      probeQueries.map(q => searchCorpus(q, {
+        vectorizeWorker: env.VECTORIZE_WORKER,
+        vectorizeApiKey: VECTORIZE_API_KEY,
+        limit: 50,
+      }))
+    );
+    const seen = new Set();
+    const allResults = [];
+    for (const results of allSearches) {
+      for (const r of results) {
+        const key = r.id ?? (r.text ?? "").slice(0, 40);
+        if (!seen.has(key)) { seen.add(key); allResults.push(r); }
+      }
+    }
+    const authorContent = filterByAuthors(allResults, [clean]).map(formatResult);
     if (authorContent.length) {
       authorContent.sort((a, b) => (b.likes || 0) - (a.likes || 0));
       const preview = authorContent.slice(0, 3)
         .map(r => `• "${r.text.slice(0, 100)}${r.text.length > 100 ? "…" : ""}"${r.likes ? ` (${r.likes.toLocaleString()} likes)` : ""}`)
         .join("\n");
       await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
-        `${b(`Already have ${authorContent.length} tweets from @${clean} in your corpus:`)}\n\n${preview}`
+        `${b(`Found ${authorContent.length} tweets from @${clean} in your corpus:`)}\n\n${preview}`
       );
     } else {
       await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
-        `No content from @${clean} in the corpus yet — they'll appear after the next daily sync.`
+        `Use /search to find their content in your corpus, or /refresh to see top posts from all your targets.`
       );
     }
   } catch {
@@ -678,38 +694,52 @@ export async function handleRefresh(chatId, env) {
 
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId, `⏳ Scanning corpus from ${targets.length} target accounts...`);
 
+  // Wide net across every cluster — batched to stay under rate limit (10 req/10s)
   const queries = [
-    "opinions technology CLAUDE_API_KEY startup founders",
-    "football soccer premier league match",
-    "Nigeria politics economy president",
-    "investing finance markets money",
+    "AI software engineering developer tools code",
+    "Liverpool Anfield Klopp Slot premier league",
+    "Nigeria Lagos politics governance protest",
+    "finance investing wealth money markets",
+    "life observations humor culture parenting family",
+    "Nigerian writing journalism story literature",
+    "music rap hip hop artist album",
+    "football goal transfer signing manager",
+    "social media viral trending funny reaction",
+    "relationships love dating marriage advice",
   ];
 
-  const allSearches = await Promise.all(
-    queries.map(q => searchCorpus(q, {
-      vectorizeWorker: env.VECTORIZE_WORKER,
-      vectorizeApiKey: VECTORIZE_API_KEY,
-      limit: 50,
-    }))
-  );
+  const batchA = queries.slice(0, 5);
+  const batchB = queries.slice(5);
+  const [resultsA, resultsB] = await Promise.all([
+    Promise.all(batchA.map(q => searchCorpus(q, { vectorizeWorker: env.VECTORIZE_WORKER, vectorizeApiKey: VECTORIZE_API_KEY, limit: 50 }))),
+    new Promise(res => setTimeout(res, 1100)).then(() =>
+      Promise.all(batchB.map(q => searchCorpus(q, { vectorizeWorker: env.VECTORIZE_WORKER, vectorizeApiKey: VECTORIZE_API_KEY, limit: 50 })))
+    ),
+  ]);
+  const allSearches = [...resultsA, ...resultsB];
 
+  // Collect all target matches, deduplicate, then randomly sample 10
   const seen = new Set();
-  const allResults = [];
+  const pool = [];
   for (const results of allSearches) {
     for (const r of filterByAuthors(results, targets).map(formatResult)) {
       const key = r.text.slice(0, 60);
-      if (!seen.has(key)) { seen.add(key); allResults.push(r); }
+      if (!seen.has(key)) { seen.add(key); pool.push(r); }
     }
   }
 
-  allResults.sort((a, b) => (b.likes || 0) - (a.likes || 0));
-  const top = allResults.slice(0, 8);
-
-  if (!top.length) {
+  if (!pool.length) {
     return sendMessage(TELEGRAM_BOT_TOKEN, chatId,
       `No content from your targets in the corpus yet. Run the daily sync first.`
     );
   }
+
+  // Shuffle and pick 10 — different results every time
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const top = pool.slice(0, 10);
 
   const lines = top.map((r, idx) => {
     const likesStr = r.likes ? ` · ${r.likes.toLocaleString()} likes` : "";
@@ -717,7 +747,7 @@ export async function handleRefresh(chatId, env) {
   });
 
   await sendMessage(TELEGRAM_BOT_TOKEN, chatId,
-    `${b("Top content from your target accounts:")}\n\n${lines.join("\n\n")}\n\n${i("Sorted by engagement · From your bookmark corpus")}`
+    `${b("From your target accounts:")}\n\n${lines.join("\n\n")}\n\n${i(`${pool.length} matches across ${targets.length} targets · Shuffled each time`)}`
   );
 }
 
@@ -866,7 +896,7 @@ export async function handleTrending(chatId, arg, env) {
   const queries = topic
     ? [topic]
     : [
-        "best insights opinions technology CLAUDE_API_KEY",
+        "best insights opinions technology startup",
         "Nigeria government politics economy",
         "football premier league champions league",
         "investing finance markets entrepreneurship",
